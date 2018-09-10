@@ -186,6 +186,7 @@ sub config_func {
 
   #$Data::Dumper::Indent = 0;
   #plugin_log(LOG_INFO, Dumper($CONFIG));
+  return 1;
 
 }
 

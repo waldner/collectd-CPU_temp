@@ -23,14 +23,14 @@ Place something similar to the following lines in your `collectd.conf`:
 
         LoadPlugin CPU_temp
 
-#        <Plugin CPU_temp>
+        <Plugin CPU_temp>
 #          Packages "0" "1"        # optional: which CPU packages to monitor, default: all
 #          IgnoreSelected False    # invert package selection, default false. Valid values: False, 0, Off or True, 1, On
 #          <Package "0">           # optional per-package config
 #            Cores "2" "3"         # within package 0, select cores 2 and 3 (default: all cores)
 #            IgnoreSelected False  # invert cores selection, default false
 #          </Package>
-#        </Plugin>
+        </Plugin>
 </Plugin>
 ```
 
