@@ -193,13 +193,7 @@ sub config_func {
 # callback to collect the data and dispatch it
 sub read_func {
 
-  #plugin_log(LOG_NOTICE, "cpu_temp read!"); # debug
-
   my $readings = do_read();
-
-  #plugin_log(LOG_NOTICE, "cpu_temp after read!"); # debug
-
-  #my $diskstats = do_read();
 
   my $v = {
     plugin   => $plugin_name,
@@ -211,11 +205,9 @@ sub read_func {
 
     for my $core_num (keys %{$readings->{$package_num}}) {
 
-      #plugin_log(LOG_NOTICE, "read path $path"); # debug
       $v->{plugin_instance} = $package_num;
       $v->{type_instance} = $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'label'};
       $v->{values} = [ $readings->{$package_num}->{$core_num} ];
-      #plugin_log(LOG_NOTICE, "dispatch $path - $label - $v->{values}"); # debug
       plugin_dispatch_values($v);
     }
   }
