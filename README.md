@@ -34,9 +34,17 @@ Place something similar to the following lines in your `collectd.conf`:
 </Plugin>
 ```
 
-Values in the `Packages` line refer to the corresponding `coretemp.*` directory under `/sys/devices/platform/`, so if you have 2 CPU packages (`/sys/devices/platform/coretemp.0` and `/sys/devices/platform/coretemp.1`) and say `Packages "1"`, only `/sys/devices/platform/coretemp.1` will be read.
+Values in the `Packages` line refer to the corresponding `coretemp.*` directory under `/sys/devices/platform/`, so if you have 2 CPU packages (`/sys/devices/platform/coretemp.0` and `/sys/devices/platform/coretemp.1`) and say
 
-Values in the `Cores` line refer to the file names that Linux uses to store temperature values, and may or may not correspond to the actual CPU core number (`they usually don't, so beware`). For example, you may have a file `/sys/devices/platform/coretemp.0/hwmon/hwmon3/temp2_input` which actually corresponds to *Core 0*, as shown by reading the contents of the associated label file:
+```
+<Plugin CPU_temp>
+   Packages "1"
+</Plugin>
+```
+
+only `/sys/devices/platform/coretemp.1` will be read. You can use `IgnoreSelected` to exclude, rather than include, the listed packages. By default, all found packages are read.
+
+Values in the `Cores` line refer to the names of the file sets that Linux uses to store individual cores information, and may or may not correspond to the actual CPU core number (_they usually don't, so beware_). For example, you may have a file `/sys/devices/platform/coretemp.0/hwmon/hwmon3/temp2_input` which actually corresponds to **Core 0**, as shown by reading the contents of the associated label file:
 
 ```
 # cat /sys/devices/platform/coretemp.0/hwmon/hwmon3/temp2_label
@@ -44,7 +52,7 @@ Core 0
 
 ```
 
-So if you only wanted to read the temperature of core 0, you'd use:
+So if you only wanted to read the temperature of core 0 (for example in package 0), you'd use:
 
 ```
    <Package "0">
@@ -52,7 +60,7 @@ So if you only wanted to read the temperature of core 0, you'd use:
    </Package>
 ```
 
-Also, in some cases there's an extra file that holds information for the package as a whole (usually it's temp1\_*, from what I can see):
+Also, in some cases there's an extra file set that holds information for the package as a whole (usually it's `temp1_*`, from what I can see):
 
 ```
 # cat /sys/devices/platform/coretemp.0/hwmon/hwmon3/temp1_label
@@ -80,6 +88,6 @@ or only include the global data and exclude the cores:
 
 or read everything, of course, which is the default if no special configuration is specified. 
 
-Put the actual plugin (`CPU_temp.pm`) inside `/path/to/collectd_plugins/Collectd/Plugins` (or whatever your `IncludeDir` and `BaseName` above are).
+Put the actual plugin (`CPU_temp.pm`) inside `/path/to/collectd_plugins/Collectd/Plugins` (or whatever your `IncludeDir` and `BaseName` above are). Note however that the plugin package name assumes you're using Collectd::Plugins as `BaseName`.
 Finally, restart collectd and hopefully see the values being collected.
 
