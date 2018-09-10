@@ -91,3 +91,7 @@ or read everything, of course, which is the default if no special configuration 
 Put the actual plugin (`CPU_temp.pm`) inside `/path/to/collectd_plugins/Collectd/Plugins` (or whatever your `IncludeDir` and `BaseName` above are). Note however that the plugin package name assumes you're using Collectd::Plugins as `BaseName`.
 Finally, restart collectd and hopefully see the values being collected.
 
+
+### Caveats
+
+Only works for Intel CPUs (AFAIK) and only on Linux.
