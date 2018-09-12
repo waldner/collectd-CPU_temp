@@ -31,7 +31,7 @@ Place something similar to the following lines in your `collectd.conf`:
 #
 #    # CoresByLabel, CoresByFile and IgnoreSelectedCores can be overridden on a per-package basis
 #    <Package "0">
-#      CoresByFile "^Core"
+#      CoresByLabel "^Core"
 #      IgnoreSelectedCores False
 #    </Package>
   </Plugin>
