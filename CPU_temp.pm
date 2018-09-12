@@ -27,15 +27,22 @@ my $SYS_PATH = '/sys/devices/platform';
 #### Utility function(s) ####################################################
 
 # search for hash with key "$key" among the children of the given ref
+# optionally takes a value, in which case only the key(s) with that value
+# is selected
 sub get_key {
 
-  my ($key, $ref) = (shift, shift);    # string, array ref
+  my ($key, $ref, $value) = (shift, shift, shift);    # string, array ref, string (optional)
 
   # array of hash references (usually one element)
   my @results = grep { lc($_->{'key'}) eq lc($key) } @{$ref->{'children'}};
 
+  if (defined($value)) {
+    @results = grep { $_->{'values'}->[0] eq $value } @results;
+  }
+
   return @results;
 }
+
 
 # fetch the actual temp values from /sys
 sub do_read {
@@ -46,15 +53,13 @@ sub do_read {
 
     next if ($CONFIG->{$package_num}->{'do'} == 0);
 
-    for my $core_num (keys %{$CONFIG->{$package_num}->{'cores'}}) {
-
-      next if ($CONFIG->{$package_num}->{'cores'}->{$core_num}->{'do'} == 0);
-
-      open(FH, $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'input'}) or next;
+    for my $core_elem (@{$CONFIG->{$package_num}->{'cores'}}) {
+      next if ($core_elem->{'do'} == 0);
+      open(FH, $core_elem->{'input'}) or next;
       my $temp = <FH>;
       close(FH);
       chomp $temp;
-      $readings{$package_num}{$core_num} = $temp / 1000;
+      $readings{$package_num}->{$core_elem->{'label'}} = $temp / 1000;
     }
   }
   return \%readings;
@@ -84,16 +89,22 @@ sub config_func {
     $CONFIG->{$package_num}->{'path'} = $path;
     $CONFIG->{$package_num}->{'do'} = 1;
 
+    $CONFIG->{$package_num}->{'cores'} = [];
+
     # look for available cores
     my @labels = glob("$path/*_label");
 
     for my $label (@labels) {
+      my %core;
       (my $core_num = $label) =~ s|$path/temp(\d+)_label|$1|g;
+      $core{'byfile'} = $core_num;
       open(FH, $label) or next;
-      chomp ($CONFIG->{$package_num}->{'cores'}->{$core_num}->{'label'} = <FH>);
+      chomp ($core{'label'} = <FH>);
       close(FH);
-      $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'do'} = 1;
-      ($CONFIG->{$package_num}->{'cores'}->{$core_num}->{'input'} = $label) =~ s/_label/_input/;
+      $core{'do'} = 1;
+      ($core{'input'} = $label) =~ s/_label/_input/;
+
+      push @{$CONFIG->{$package_num}->{'cores'}}, \%core;
     }
   }
 
@@ -102,84 +113,117 @@ sub config_func {
 
   if ($packages_var) {
     
-    # check whether to invert selection
-    my $invert = (get_key('IgnoreSelected', $config))[0];
-
-    if ($invert) {
-      if ($invert->{'values'}->[0] =~ /^(1|[Tt]rue|[Oo]n)$/) {
-        $invert = 1;
-      } else {
-        $invert = 0;
-      } 
-    } else {
-      $invert = 0;
+   for my $package_num (keys %{$CONFIG}) {
+      if (!($package_num ~~ @{$packages_var->{'values'}})) {
+        $CONFIG->{$package_num}->{'do'} = 0;
+      }
     }
 
-    if ($invert == 1) {
-      # remove wanted packages from those found
-      for my $package_num (@{$packages_var->{'values'}}) {
-        if (exists $CONFIG->{$package_num}) {
-          $CONFIG->{$package_num}->{'do'} = 0;
-        }
-      }
-    } else {
+    # check whether to invert selection
+    my $packages_invert = (get_key('IgnoreSelected', $config))[0];
 
-      # remove unwanted packages
+    if ($packages_invert) {
+      if ($packages_invert->{'values'}->[0] =~ /^(1|[Tt]rue|[Oo]n)$/) {
+        $packages_invert = 1;
+      } else {
+        $packages_invert = 0;
+      } 
+    } else {
+      $packages_invert = 0;
+    }
+
+    if ($packages_invert == 1) {
       for my $package_num (keys %{$CONFIG}) {
-        if ($package_num ~~ @{$packages_var->{'values'}}) {
-          $CONFIG->{$package_num}->{'do'} = 1;
-        } else {
-          $CONFIG->{$package_num}->{'do'} = 0;
-        }
+        $CONFIG->{$package_num}->{'do'} = 1 - $CONFIG->{$package_num}->{'do'};
       }
     }
   }
 
-  # now check for explicitly included/excluded cores within packages
-  my @packages_sections = get_key('Package', $config);
+  # get global core selection, if any
+  my $coresbyfile_var = (get_key('CoresByFile', $config))[0];
+  my $coresbylabel_var = (get_key('CoresByLabel', $config))[0];
 
-  for my $package_section (@packages_sections) {     # may be empty
+  if ($coresbyfile_var && $coresbylabel_var) {
+    plugin_log(LOG_ERR, "$plugin_name: CoresByFile and CoresByLabel are mutually exclusive (global section)");
+    exit 1;
+  }
 
-    my $package_num = $package_section->{'values'}->[0];
+  my $cores_invert = (get_key('IgnoreSelectedCores', $config))[0];
+
+  for my $package_num (keys %{$CONFIG}) {
 
     # avoid useless work
-    next if ( (!exists $CONFIG->{$package_num}) || $CONFIG->{$package_num}->{'do'} == 0);
+    next if ($CONFIG->{$package_num}->{'do'} == 0);
 
-    # get cores and invert for this package
-    my $cores_var = (get_key('Cores', $package_section))[0];
+    # check whether there's an overridden cores config for this package
+    my $package_section = (get_key('Package', $config, $package_num))[0];
 
-    if ($cores_var) {
+    if ($package_section) {
+      plugin_log(LOG_INFO, "$plugin_name: Found overridden package section for package $package_num");
+      my $overridden_coresbyfile_var = (get_key('CoresByFile', $package_section))[0];
+      my $overridden_coresbylabel_var = (get_key('CoresByLabel', $package_section))[0];
+      my $overridden_cores_invert = (get_key('IgnoreSelectedCores', $package_section))[0];
 
-      # check whether to invert selection
-      my $invert = (get_key('IgnoreSelected', $package_section))[0];
+      if ($overridden_coresbyfile_var && $overridden_coresbylabel_var) {
+        plugin_log(LOG_ERR, "$plugin_name: CoresByFile and CoresByLabel are mutually exclusive (Package $package_num section)");
+        exit 1;
+      }
 
-      if ($invert) {
-        if ($invert->{'values'}->[0] =~ /^(1|[Tt]rue|[Oo]n)$/) {
+      if ($overridden_coresbyfile_var) {
+        $coresbyfile_var = $overridden_coresbyfile_var;
+      }
+      if ($overridden_coresbylabel_var) {
+        $coresbylabel_var = $overridden_coresbylabel_var;
+      }
+
+      if ($overridden_coresbyfile_var || $overridden_coresbylabel_var) {
+        if ($overridden_cores_invert) {
+          $cores_invert = $overridden_cores_invert;
+        }
+      }
+    }
+
+    my $invert = 0;
+
+    if ($coresbyfile_var || $coresbylabel_var) {
+      if ($cores_invert) {
+        if ($cores_invert->{'values'}->[0] =~ /^(1|[Tt]rue|[Oo]n)$/) {
           $invert = 1;
         } else {
           $invert = 0;
-        } 
+        }
       } else {
         $invert = 0;
       }
+    }
 
-      if ($invert == 1) {
-        # remove wanted cores from those found
-        for my $core_num (@{$cores_var->{'values'}}) {
-          if (exists $CONFIG->{$package_num}->{'cores'}->{$core_num}) {
-            $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'do'} = 0;
+    if ($coresbyfile_var) {
+      # remove unwanted cores
+      for my $core_elem (@{$CONFIG->{$package_num}->{'cores'}}) {
+        if ($core_elem->{'byfile'} ~~ @{$coresbyfile_var->{'values'}}) {
+          $core_elem->{'do'} = 1;
+        } else {
+          $core_elem->{'do'} = 0;
+        }
+      }
+    } elsif ($coresbylabel_var) {
+
+      for my $core_elem (@{$CONFIG->{$package_num}->{'cores'}}) {
+        my $selected = 0;
+        for my $core_pat (@{$coresbylabel_var->{'values'}}) {
+          if ($core_elem->{'label'} =~ m|$core_pat|i) {
+            $selected = 1;
           }
         }
-      } else {
- 
-        # remove unwanted cores
-        for my $core_num (keys %{$CONFIG->{$package_num}->{'cores'}}) {
-          if ($core_num ~~ @{$cores_var->{'values'}}) {
-            $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'do'} = 1;
-          } else {
-            $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'do'} = 0;
-          }
+        if ($selected == 0) {
+          $core_elem->{'do'} = 0;
         }
+      }
+    }
+
+    if ($invert == 1) {
+      for my $core_elem (@{$CONFIG->{$package_num}->{'cores'}}) {
+        $core_elem->{'do'} = 1 - $core_elem->{'do'};
       }
     }
   }
@@ -207,7 +251,7 @@ sub read_func {
     for my $core_num (keys %{$readings->{$package_num}}) {
 
       $v->{plugin_instance} = $package_num;
-      $v->{type_instance} = $CONFIG->{$package_num}->{'cores'}->{$core_num}->{'label'};
+      $v->{type_instance} = $core_num;
       $v->{values} = [ $readings->{$package_num}->{$core_num} ];
       plugin_dispatch_values($v);
     }
